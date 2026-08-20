@@ -2,42 +2,19 @@ const { pool } = require("../config/db");
 const { parseBankSms, namesLooselyMatch } = require("../utils/smsParser");
 const depositRequestService = require("./depositRequestService");
 
-/**
- * Ingests one SMS forwarded by the Android bridge (MacroDroid, or the
- * Termux script — either posts the same shape to this endpoint).
- *
- * Matching strategy, strongest signal first — never approves on amount
- * alone, since two different users can easily deposit the same amount
- * around the same time:
- *
- *   1. Reference match: exact transaction reference + amount + method +
- *      PENDING status. This is the strong case (typically Telebirr, and
- *      CBE when the SMS happens to include a "Ref no").
- *
- *   2. Amount + payer-name fallback: for messages with no extractable
- *      reference (common for CBE), match on amount + method + PENDING
- *      status, narrowed by a loose name match against what the user
- *      entered. Only auto-approves when this narrows candidates to
- *      EXACTLY ONE — any ambiguity (e.g. two users deposited the same
- *      amount that day) falls through to manual review instead of
- *      guessing.
- *
- * Either way, every message is logged to bank_sms_messages so the parser
- * and matching logic stay auditable.
- */
 async function ingest({ text, sender, provider: providerHint }) {
-    console.log("📥 [Service] ingest called with:", { text, sender, provider });
-
   if (!text || typeof text !== "string") {
     const err = new Error("`text` is required");
     err.statusCode = 400;
     throw err;
   }
 
-  const parsed = parseBankSms(text, providerHint);
+  // Pass senderHint as the third argument
+  const parsed = parseBankSms(text, providerHint, sender);
   const { provider, amount, ref, name } = parsed;
 
-  console.log(parsed);
+  console.log("📥 [Service] ingest called with:", { text, sender, providerHint, parsed });
+
   let matchedRequestId = null;
   let matchStrategy = null;
   let status = "UNPARSEABLE";
@@ -49,26 +26,25 @@ async function ingest({ text, sender, provider: providerHint }) {
     if (ref) {
       const { rows } = await pool.query(
         `SELECT id, amount FROM deposit_requests
-         WHERE status = 'PENDING' AND method = $1 AND lower(transaction_ref) = lower($2)
+         WHERE status = 'PENDING'
+           AND method = $1
+           AND (lower(declared_reference) = lower($2) OR lower(ocr_transaction_id) = lower($2))
          LIMIT 2`,
         [provider, ref]
       );
-      // Exactly one PENDING request with this ref, and the amount also
-      // checks out — a reference collision matching two different
-      // pending requests should never happen (it's meant to be unique),
-      // but if it somehow did, that's exactly the ambiguity we refuse
-      // to guess through.
       if (rows.length === 1 && Number(rows[0].amount) === amount) {
         matchedRequestId = rows[0].id;
         matchStrategy = "reference";
       }
     }
 
-    // --- Strategy 2: amount + payer-name fallback (no ref on the SMS) ---
+    // --- Strategy 2: amount + payer-name fallback ---
     if (!matchedRequestId && name) {
       const { rows } = await pool.query(
         `SELECT id, sender_name FROM deposit_requests
-         WHERE status = 'PENDING' AND method = $1 AND amount = $2
+         WHERE status = 'PENDING'
+           AND method = $1
+           AND amount = $2
            AND created_at > now() - interval '48 hours'`,
         [provider, amount]
       );
@@ -79,18 +55,14 @@ async function ingest({ text, sender, provider: providerHint }) {
         matchedRequestId = candidates[0].id;
         matchStrategy = "amount+name";
       }
-      // 0 candidates -> genuinely no match. 2+ candidates -> ambiguous,
-      // deliberately left for a human to sort out rather than guessing.
     }
 
     if (matchedRequestId) {
       try {
-        await depositRequestService.approve(matchedRequestId, null, { auto: true });
+        // Note: approve expects adminId as second param; we pass null for auto
+        await depositRequestService.approve(matchedRequestId, null);
         status = "MATCHED";
       } catch (err) {
-        // Already reviewed by an admin in the meantime, or some other
-        // conflict — leave it logged as unmatched rather than throwing,
-        // since the SMS itself was still received successfully.
         matchedRequestId = null;
         matchStrategy = null;
         status = "UNMATCHED";

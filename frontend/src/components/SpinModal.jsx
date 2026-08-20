@@ -1,30 +1,29 @@
-import React, { useState } from "react";
-import Wheel from "./Wheel.jsx";
+import React, { useMemo, useState } from "react";
 import { api } from "../services/api.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
+import SpinWheel from "./SpinWheel.jsx";
 
-export default function SpinModal({ segments, onClose, onSpun }) {
+const REWARD_POOL = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+
+export default function SpinModal({ onClose, onSpun }) {
   const { t } = useLanguage();
   const [phase, setPhase] = useState("idle"); // idle | spinning | done | error
   const [reward, setReward] = useState(null);
-  const [targetIndex, setTargetIndex] = useState(null);
   const [error, setError] = useState(null);
+
+  const segments = useMemo(() => REWARD_POOL.map((v) => ({ label: v, value: v })), []);
+  const winningIndex = reward !== null ? REWARD_POOL.indexOf(reward) : null;
 
   async function handleSpin() {
     setError(null);
     try {
       const { result } = await api.spin();
       setReward(result.reward);
-      setTargetIndex(result.segmentIndex);
       setPhase("spinning");
     } catch (err) {
       setError(err.message);
       setPhase("error");
     }
-  }
-
-  function handleSpinEnd() {
-    setPhase("done");
   }
 
   function handleClose() {
@@ -40,12 +39,11 @@ export default function SpinModal({ segments, onClose, onSpun }) {
         </h2>
 
         <div className="mb-4">
-          <Wheel
+          <SpinWheel
             segments={segments}
-            targetIndex={targetIndex}
-            spinning={phase === "spinning"}
-            onSpinEnd={handleSpinEnd}
-            size={240}
+            winningIndex={winningIndex}
+            spin={phase === "spinning"}
+            onSettled={() => setPhase("done")}
           />
         </div>
 

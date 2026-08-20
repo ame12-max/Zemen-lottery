@@ -36,10 +36,16 @@ export default function Navbar() {
       </div>
 
       {user.role === "ADMIN" && (
-        <nav className="flex items-center gap-5 border-t border-surfaceRaised bg-ink px-4 py-1.5 sm:px-6">
+        <nav className="flex items-center gap-5 overflow-x-auto border-t border-surfaceRaised bg-ink px-4 py-1.5 sm:px-6">
           <span className="font-display text-xs tracking-widest text-goldDim">ADMIN</span>
           <NavLink to="/admin" end className={adminLinkClass}>
             {t("createPool")}
+          </NavLink>
+          <NavLink to="/admin/games" className={adminLinkClass}>
+            Pools
+          </NavLink>
+          <NavLink to="/admin/users" className={adminLinkClass}>
+            Users
           </NavLink>
           <NavLink to="/admin/deposits" className={adminLinkClass}>
             {t("deposits")}

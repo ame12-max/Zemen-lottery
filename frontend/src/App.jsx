@@ -1,12 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Routes, Route } from "react-router-dom";
 import Navbar from "./components/Navbar.jsx";
 import BottomTabs from "./components/BottomTabs.jsx";
 import WinnerAnnouncement from "./components/WinnerAnnouncement.jsx";
-import WinCelebrationModal from "./components/WinCelebrationModal.jsx";
+import WinPopup from "./components/WinPopup.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
-import { api } from "./services/api.js";
 import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
 import Games from "./pages/Games.jsx";
@@ -16,44 +15,21 @@ import Deposit from "./pages/Deposit.jsx";
 import Withdraw from "./pages/Withdraw.jsx";
 import MyTickets from "./pages/MyTickets.jsx";
 import Profile from "./pages/Profile.jsx";
+import Invite from "./pages/Invite.jsx";
 import Admin from "./pages/Admin.jsx";
+import AdminGames from "./pages/AdminGames.jsx";
+import AdminUsers from "./pages/AdminUsers.jsx";
 import AdminDeposits from "./pages/AdminDeposits.jsx";
 import AdminWithdrawals from "./pages/AdminWithdrawals.jsx";
 
 export default function App() {
   const { user } = useAuth();
-  const [unseenWins, setUnseenWins] = useState([]);
-
-  // Checked once per login (and on a fresh page load while already logged
-  // in) — a beautiful "you won!" popup for any draw the user hasn't seen
-  // the result of yet.
-  useEffect(() => {
-    if (!user) {
-      setUnseenWins([]);
-      return;
-    }
-    api
-      .myUnseenWins()
-      .then((d) => setUnseenWins(d.wins))
-      .catch(() => {});
-  }, [user?.id]);
-
-  async function handleAcknowledgeWin(ticketId) {
-    try {
-      await api.acknowledgeWin(ticketId);
-    } catch {
-      // even if this fails, don't trap the user behind the modal
-    }
-    setUnseenWins((prev) => prev.filter((w) => w.ticket_id !== ticketId));
-  }
 
   return (
     <div className="min-h-screen bg-ink">
       <Navbar />
+      {user && <WinPopup />}
       {user && <WinnerAnnouncement />}
-      {user && unseenWins.length > 0 && (
-        <WinCelebrationModal wins={unseenWins} onAcknowledge={handleAcknowledgeWin} />
-      )}
       <div className={user ? "pb-20" : ""}>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -115,10 +91,42 @@ export default function App() {
             }
           />
           <Route
+            path="/invite"
+            element={
+              <ProtectedRoute>
+                <Invite />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin"
             element={
               <ProtectedRoute adminOnly>
                 <Admin />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/edit/:id"
+            element={
+              <ProtectedRoute adminOnly>
+                <Admin />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/games"
+            element={
+              <ProtectedRoute adminOnly>
+                <AdminGames />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <ProtectedRoute adminOnly>
+                <AdminUsers />
               </ProtectedRoute>
             }
           />

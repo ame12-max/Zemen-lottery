@@ -38,7 +38,7 @@ export default function MyTickets() {
 
       <div className="space-y-3">
         {tickets?.map((tk) => {
-          const isWinner = tk.game_status === "COMPLETED" && tk.winner_ticket_id === tk.id;
+          const isWinner = tk.won_rank != null;
           return (
             <Link
               key={tk.id}
@@ -50,7 +50,9 @@ export default function MyTickets() {
               <div className="p-4">
                 <div className="font-display text-xl tracking-wide">{tk.game_name}</div>
                 <div className={`text-xs font-semibold ${STATUS_COLOR[tk.game_status]}`}>
-                  {isWinner ? t("youWon").toUpperCase() : tk.game_status}
+                  {isWinner
+                    ? `${t("youWon").toUpperCase()} — #${tk.won_rank} PLACE — ${tk.won_amount} ETB`
+                    : tk.game_status}
                 </div>
               </div>
               <div className="ticket-tear flex w-20 flex-col items-center justify-center border-l px-2">

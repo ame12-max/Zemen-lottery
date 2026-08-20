@@ -4,14 +4,11 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import { api } from "../services/api.js";
 import SpinModal from "../components/SpinModal.jsx";
-import { useToast } from "../context/ToastContext.jsx";
 
 export default function Profile() {
   const { user, logout } = useAuth();
   const { lang, setLang, t } = useLanguage();
-  const { showToast } = useToast();
   const [points, setPoints] = useState(null);
-  const [referral, setReferral] = useState(null);
   const [showSpin, setShowSpin] = useState(false);
 
   function refreshPoints() {
@@ -19,26 +16,10 @@ export default function Profile() {
   }
 
   useEffect(refreshPoints, []);
-  useEffect(() => {
-    api.getReferrals().then(setReferral);
-  }, []);
 
   const progressPct = points
     ? Math.round((points.pointsIntoLevel / points.pointsPerLevel) * 100)
     : 0;
-
-  const referralLink = referral
-    ? `${window.location.origin}/register?ref=${referral.referralCode}`
-    : "";
-
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(referralLink);
-      showToast(t("copied"), "success");
-    } catch {
-      showToast(referralLink, "info");
-    }
-  }
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
@@ -48,6 +29,17 @@ export default function Profile() {
         <div className="mb-1 text-lg font-semibold text-paper">{user.name}</div>
         <div className="font-mono text-sm text-mist">{user.phone}</div>
       </div>
+
+      <Link
+        to="/invite"
+        className="mb-6 flex items-center justify-between rounded-lg bg-gradient-to-r from-surface to-surfaceRaised p-6 transition-opacity hover:opacity-90"
+      >
+        <div>
+          <div className="font-display text-lg tracking-wide text-gold">🎁 Invite friends</div>
+          <div className="text-xs text-mist">Earn ETB and points for every invite</div>
+        </div>
+        <span className="text-mist">›</span>
+      </Link>
 
       <div className="mb-6 rounded-lg bg-surface p-6">
         <div className="mb-3 flex items-center justify-between">
@@ -85,65 +77,6 @@ export default function Profile() {
       </div>
 
       <div className="mb-6 rounded-lg bg-surface p-6">
-        <h2 className="mb-1 font-display tracking-widest text-gold">{t("inviteFriends")}</h2>
-        <p className="mb-4 text-xs text-mist">{t("inviteFriendsRule")}</p>
-
-        <div className="mb-3 flex items-center justify-between rounded bg-ink p-3">
-          <div>
-            <div className="text-xs text-mist">{t("yourReferralCode")}</div>
-            <div className="font-mono text-xl font-bold tracking-widest text-paper">
-              {referral?.referralCode ?? "…"}
-            </div>
-          </div>
-          <button
-            onClick={copyLink}
-            className="rounded bg-gold px-4 py-2 font-display text-sm tracking-widest text-ink transition-opacity hover:opacity-90"
-          >
-            {t("copyLink").toUpperCase()}
-          </button>
-        </div>
-
-        <div className="mb-4 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded bg-ink p-2">
-            <div className="font-mono text-lg font-bold text-paper">
-              {referral?.totalInvited ?? 0}
-            </div>
-            <div className="text-xs text-mist">{t("totalInvited")}</div>
-          </div>
-          <div className="rounded bg-ink p-2">
-            <div className="font-mono text-lg font-bold text-teal">
-              {referral?.totalCompleted ?? 0}
-            </div>
-            <div className="text-xs text-mist">{t("totalCompleted")}</div>
-          </div>
-          <div className="rounded bg-ink p-2">
-            <div className="font-mono text-lg font-bold text-gold">
-              {referral?.totalEarned ?? 0} ETB
-            </div>
-            <div className="text-xs text-mist">{t("totalEarned")}</div>
-          </div>
-        </div>
-
-        {referral?.referrals?.length > 0 && (
-          <div>
-            <h3 className="mb-2 text-xs tracking-widest text-mist">
-              {t("referralHistory").toUpperCase()}
-            </h3>
-            <ul className="divide-y divide-surfaceRaised">
-              {referral.referrals.map((r, i) => (
-                <li key={i} className="flex items-center justify-between py-2 text-sm">
-                  <span className="text-paper">{r.invitee_name}</span>
-                  <span className={r.status === "COMPLETED" ? "text-teal" : "text-goldDim"}>
-                    {r.status === "COMPLETED" ? t("completed") : t("pending")}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      <div className="mb-6 rounded-lg bg-surface p-6">
         <h2 className="mb-3 font-display tracking-widest text-mist">{t("language")}</h2>
         <div className="flex gap-2">
           <button
@@ -176,6 +109,18 @@ export default function Profile() {
               {t("createPool")}
             </Link>
             <Link
+              to="/admin/games"
+              className="rounded bg-ink py-2 text-center text-sm text-paper hover:text-gold"
+            >
+              Manage pools
+            </Link>
+            <Link
+              to="/admin/users"
+              className="rounded bg-ink py-2 text-center text-sm text-paper hover:text-gold"
+            >
+              Users
+            </Link>
+            <Link
               to="/admin/deposits"
               className="rounded bg-ink py-2 text-center text-sm text-paper hover:text-gold"
             >
@@ -200,7 +145,6 @@ export default function Profile() {
 
       {showSpin && (
         <SpinModal
-          segments={points?.spinSegments ?? [5, 10, 15, 20, 10, 25, 5, 50]}
           onClose={() => setShowSpin(false)}
           onSpun={() => {
             refreshPoints();

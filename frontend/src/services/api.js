@@ -40,8 +40,11 @@ async function request(path, { method = "GET", body, headers = {} } = {}) {
   if (!res.ok) {
     if (res.status === 429) {
       throw new Error(
-        data?.error || "You're going a bit fast — please wait a moment and try again."
+        data?.error || "You're doing that a bit too fast. Please wait a moment and try again."
       );
+    }
+    if (res.status >= 500) {
+      throw new Error(data?.error || "Something went wrong on our end. Please try again shortly.");
     }
     throw new Error(data?.error || `Request failed with status ${res.status}`);
   }
@@ -89,6 +92,8 @@ export const api = {
   getMyPoints: () => request("/wallet/points"),
   spin: () => request("/wallet/spin", { method: "POST" }),
 
+  getReferralInfo: () => request("/wallet/referrals"),
+
   listGames: () => request("/games"),
   getGame: (gameId) => request(`/games/${gameId}`),
   getGameTickets: (gameId) => request(`/games/${gameId}/tickets`),
@@ -99,10 +104,17 @@ export const api = {
     }),
   myTickets: () => request("/games/my-tickets"),
   recentWinners: () => request("/games/recent-winners"),
-  myUnseenWins: () => request("/games/my-unseen-wins"),
-  acknowledgeWin: (ticketId) => request(`/games/wins/${ticketId}/seen`, { method: "POST" }),
+  getMyUnseenWins: () => request("/games/my-wins/unseen"),
+  acknowledgeWin: (winId) => request(`/games/my-wins/${winId}/ack`, { method: "POST" }),
 
   createGame: (payload) => request("/admin/games", { method: "POST", body: payload }),
+  listAllGamesAdmin: () => request("/admin/games"),
+  updateGame: (id, payload) => request(`/admin/games/${id}`, { method: "PUT", body: payload }),
+  deleteGame: (id) => request(`/admin/games/${id}`, { method: "DELETE" }),
+  getGameWinners: (gameId) => request(`/games/${gameId}/winners`),
+
+  getUserStats: () => request("/admin/users/stats"),
+  listAdminUsers: (filter) => request(`/admin/users?filter=${filter || "ALL"}`),
 
   listAdminDepositRequests: (status) =>
     request(`/admin/deposit-requests${status ? `?status=${status}` : ""}`),
@@ -118,7 +130,8 @@ export const api = {
   rejectWithdrawal: (id, note) =>
     request(`/admin/withdrawal-requests/${id}/reject`, { method: "POST", body: { note } }),
 
-  getReferrals: () => request("/referrals/me"),
+  ingestBankMessage: (method, message) =>
+    request("/admin/bank-messages", { method: "POST", body: { method, message } }),
 };
 
 export { getToken };

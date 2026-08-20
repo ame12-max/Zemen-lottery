@@ -14,6 +14,8 @@ export default function TicketStub({ game }) {
   const { t } = useLanguage();
   const sold = Number(game.tickets_sold ?? 0);
   const remaining = game.max_tickets - sold;
+  const topPrize = game.top_prize ?? game.prize_amount;
+  const isMultiWinner = Number(topPrize) < Number(game.prize_amount);
 
   return (
     <Link
@@ -33,13 +35,18 @@ export default function TicketStub({ game }) {
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-sm text-ink/80">
           <dt>{t("ticketPrice")}</dt>
           <dd className="text-right font-semibold">{game.ticket_price} ETB</dd>
-          <dt>{t("prize")}</dt>
-          <dd className="text-right font-semibold text-goldDim">{game.prize_amount} ETB</dd>
+          <dt>{isMultiWinner ? "Top prize" : t("prize")}</dt>
+          <dd className="text-right font-semibold text-goldDim">{topPrize} ETB</dd>
           <dt>{t("ticketsLeft")}</dt>
           <dd className="text-right font-semibold">
             {remaining} / {game.max_tickets}
           </dd>
         </dl>
+        {isMultiWinner && (
+          <div className="mt-2 text-xs font-semibold text-goldDim">
+            🏆 {game.prize_amount} ETB total pool — multiple winners
+          </div>
+        )}
       </div>
 
       <div className="ticket-tear flex w-24 flex-col items-center justify-center border-l-0 px-2 py-5 sm:border-l">

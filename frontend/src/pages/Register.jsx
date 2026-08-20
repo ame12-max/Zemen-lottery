@@ -17,7 +17,7 @@ export default function Register() {
   async function handleSubmit(e) {
     e.preventDefault();
     try {
-      await register(name, phone, password, referralCode);
+      await register(name, phone, password, referralCode.trim() || undefined);
       navigate("/", { replace: true });
     } catch {
       // error surfaced via context
@@ -73,19 +73,19 @@ export default function Register() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded border border-surfaceRaised bg-ink px-3 py-2 text-paper outline-none focus:border-gold"
             />
-            <p className="mt-1 text-xs text-mist">{t("passwordHint")}</p>
+            <p className="mt-1 text-xs text-mist">At least 8 characters.</p>
           </div>
 
           <div>
             <label htmlFor="referralCode" className="mb-1 block text-sm text-mist">
-              {t("referralCodeOptional")}
+              Referral code (optional)
             </label>
             <input
               id="referralCode"
               value={referralCode}
               onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-              placeholder="ABC123"
-              className="w-full rounded border border-surfaceRaised bg-ink px-3 py-2 font-mono uppercase tracking-widest text-paper outline-none focus:border-gold"
+              placeholder="e.g. A1B2C3D4"
+              className="w-full rounded border border-surfaceRaised bg-ink px-3 py-2 font-mono uppercase text-paper outline-none focus:border-gold"
             />
           </div>
 

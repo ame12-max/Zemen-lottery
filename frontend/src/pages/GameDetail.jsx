@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import TicketBoard from "../components/TicketBoard.jsx";
-import DrawReel from "../components/DrawReel.jsx";
+import DrawWheel from "../components/DrawWheel.jsx";
 import { api } from "../services/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
@@ -15,6 +15,11 @@ const STATUS_COPY = {
   CANCELLED: "This pool was cancelled.",
 };
 
+const ORDINALS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"];
+function ordinal(rank) {
+  return ORDINALS[rank - 1] || `${rank}th`;
+}
+
 export default function GameDetail() {
   const { gameId } = useParams();
   const { user } = useAuth();
@@ -23,6 +28,7 @@ export default function GameDetail() {
 
   const [game, setGame] = useState(null);
   const [soldTickets, setSoldTickets] = useState([]); // [{ ticket_number, user_id }]
+  const [winners, setWinners] = useState([]);
   const [error, setError] = useState(null);
   const [selectedNumber, setSelectedNumber] = useState(null);
   const [buying, setBuying] = useState(false);
@@ -36,6 +42,10 @@ export default function GameDetail() {
       ]);
       setGame(gameData.game);
       setSoldTickets(ticketsData.tickets);
+      if (gameData.game.status === "COMPLETED") {
+        const { winners: w } = await api.getGameWinners(gameId);
+        setWinners(w);
+      }
     } catch (err) {
       setError(err.message);
     }
@@ -79,6 +89,8 @@ export default function GameDetail() {
   );
   const sold = soldTickets.length;
   const canBuy = game.status === "OPEN" && sold < game.max_tickets;
+  const topPrize = game.prize_tiers?.[0]?.prize_amount ?? game.prize_amount;
+  const myResult = winners.find((w) => String(w.user_id) === String(user.id));
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
@@ -91,8 +103,8 @@ export default function GameDetail() {
           <div className="text-lg font-semibold">{game.ticket_price} ETB</div>
         </div>
         <div className="rounded bg-surface p-3 text-center">
-          <div className="text-xs text-mist">Prize</div>
-          <div className="text-lg font-semibold text-gold">{game.prize_amount} ETB</div>
+          <div className="text-xs text-mist">Top prize</div>
+          <div className="text-lg font-semibold text-gold">{topPrize} ETB</div>
         </div>
         <div className="rounded bg-surface p-3 text-center">
           <div className="text-xs text-mist">Sold</div>
@@ -101,6 +113,20 @@ export default function GameDetail() {
           </div>
         </div>
       </div>
+
+      {game.prize_tiers?.length > 1 && (
+        <div className="mb-6 rounded-lg bg-surface p-5">
+          <h2 className="mb-3 font-display tracking-widest text-mist">PRIZES</h2>
+          <div className="space-y-1 font-mono text-sm">
+            {game.prize_tiers.map((tier) => (
+              <div key={tier.rank} className="flex justify-between">
+                <span className="text-mist">{ordinal(tier.rank)} place</span>
+                <span className="font-semibold text-paper">{tier.prize_amount} ETB</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mb-6 rounded-lg bg-surface p-5">
         <h2 className="mb-3 font-display tracking-widest text-mist">TICKET BOARD</h2>
@@ -149,11 +175,37 @@ export default function GameDetail() {
       )}
 
       {game.status === "COMPLETED" && game.winner_ticket_number && (
-        <div className="rounded-lg bg-surface p-5">
+        <div className="mb-6 rounded-lg bg-surface p-5">
           <h2 className="mb-3 text-center font-display tracking-widest text-mist">
             {t("winningTicket").toUpperCase()}
           </h2>
-          <DrawReel maxTickets={game.max_tickets} winnerTicketNumber={game.winner_ticket_number} />
+          <DrawWheel maxTickets={game.max_tickets} winnerTicketNumber={game.winner_ticket_number} />
+        </div>
+      )}
+
+      {game.status === "COMPLETED" && winners.length > 0 && (
+        <div className="rounded-lg bg-surface p-5">
+          <h2 className="mb-3 font-display tracking-widest text-mist">RESULTS</h2>
+          {myResult && (
+            <p className="mb-3 font-display tracking-wide text-gold">
+              🎉 You won {ordinal(myResult.rank)} place — {myResult.prize_amount} ETB!
+            </p>
+          )}
+          <div className="space-y-2">
+            {winners.map((w) => (
+              <div
+                key={w.rank}
+                className={`flex items-center justify-between rounded px-3 py-2 font-mono text-sm ${
+                  String(w.user_id) === String(user.id) ? "bg-ink ring-1 ring-gold" : "bg-ink"
+                }`}
+              >
+                <span className="text-mist">{ordinal(w.rank)}</span>
+                <span className="text-paper">{w.winner_name}</span>
+                <span className="text-mist">#{w.ticket_number}</span>
+                <span className="font-semibold text-gold">{w.prize_amount} ETB</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

@@ -15,6 +15,15 @@ function persistDismissed(set) {
   localStorage.setItem(DISMISSED_KEY, JSON.stringify([...set]));
 }
 
+const RANK_BADGE = { 1: "🥇", 2: "🥈", 3: "🥉" };
+function rankKey(w) {
+  return `${w.game_id}:${w.rank}`;
+}
+const ORDINALS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"];
+function ordinal(rank) {
+  return ORDINALS[rank - 1] || `${rank}th`;
+}
+
 /**
  * Fetches recently completed draws and shows them as a rotating,
  * dismissible banner — announcement-style, like the design brief asked
@@ -31,7 +40,7 @@ export default function WinnerAnnouncement() {
       .recentWinners()
       .then((data) => {
         const dismissed = getDismissed();
-        const fresh = data.winners.filter((w) => !dismissed.has(w.game_id));
+        const fresh = data.winners.filter((w) => !dismissed.has(rankKey(w)));
         setWinners(fresh);
       })
       .catch(() => {});
@@ -49,9 +58,9 @@ export default function WinnerAnnouncement() {
 
   function dismissCurrent() {
     const dismissed = getDismissed();
-    dismissed.add(current.game_id);
+    dismissed.add(rankKey(current));
     persistDismissed(dismissed);
-    setWinners((prev) => prev.filter((w) => w.game_id !== current.game_id));
+    setWinners((prev) => prev.filter((w) => rankKey(w) !== rankKey(current)));
     setIndex(0);
   }
 
@@ -59,10 +68,12 @@ export default function WinnerAnnouncement() {
     <div className="border-b border-goldDim bg-gradient-to-r from-surface via-surfaceRaised to-surface">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-2 sm:px-6">
         <p className="font-mono text-sm text-paper">
-          <span className="mr-2 font-display tracking-widest text-gold">WINNER</span>
+          <span className="mr-2 font-display tracking-widest text-gold">
+            {RANK_BADGE[current.rank] || "WINNER"}
+          </span>
           <span className="font-semibold">{current.winner_name}</span> won{" "}
-          <span className="text-gold">{current.prize_amount} ETB</span> on{" "}
-          <span className="text-mist">{current.game_name}</span> — ticket #
+          <span className="text-gold">{current.prize_amount} ETB</span> ({ordinal(current.rank)}{" "}
+          place) on <span className="text-mist">{current.game_name}</span> — ticket #
           {current.winner_ticket_number}
         </p>
         <div className="flex shrink-0 items-center gap-3">

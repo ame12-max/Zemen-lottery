@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../services/api.js";
 import { useToast } from "../context/ToastContext.jsx";
-import { useLanguage } from "../context/LanguageContext.jsx";
 
 const STATUS_COLOR = {
   PENDING: "text-gold",
@@ -11,13 +10,11 @@ const STATUS_COLOR = {
 
 export default function Deposit() {
   const { showToast } = useToast();
-  const { t } = useLanguage();
   const [methods, setMethods] = useState(null);
   const [requests, setRequests] = useState([]);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("CBE");
-  const [transactionRef, setTransactionRef] = useState("");
-  const [senderName, setSenderName] = useState("");
+  const [reference, setReference] = useState("");
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -47,10 +44,6 @@ export default function Deposit() {
       setError("Enter a whole number of ETB greater than 0.");
       return;
     }
-    if (!transactionRef.trim()) {
-      setError("Enter the transaction reference/ID from your receipt.");
-      return;
-    }
     if (!file) {
       setError("Attach a screenshot of your payment.");
       return;
@@ -59,17 +52,19 @@ export default function Deposit() {
     const formData = new FormData();
     formData.append("amount", parsedAmount);
     formData.append("method", method);
-    formData.append("transactionRef", transactionRef.trim());
-    if (senderName.trim()) formData.append("senderName", senderName.trim());
     formData.append("screenshot", file);
+    if (reference.trim()) formData.append("reference", reference.trim());
 
     setSubmitting(true);
     try {
-      await api.createDepositRequest(formData);
-      showToast("Deposit request submitted.", "success");
+      const { request } = await api.createDepositRequest(formData);
+      if (request.autoApproved) {
+        showToast("Payment verified automatically — your wallet has been credited! 🎉", "win");
+      } else {
+        showToast("Deposit request submitted — awaiting admin approval.", "success");
+      }
       setAmount("");
-      setTransactionRef("");
-      setSenderName("");
+      setReference("");
       setFile(null);
       setPreview(null);
       e.target.reset();
@@ -85,16 +80,18 @@ export default function Deposit() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <h1 className="mb-1 font-display text-3xl tracking-widest text-paper">
-        {t("deposit").toUpperCase()}
-      </h1>
-      <p className="mb-2 text-sm text-mist">{t("depositIntro")}</p>
-      <p className="mb-1 text-xs text-goldDim">{t("depositAutoNotice")}</p>
-      <p className="mb-6 text-xs text-goldDim">{t("pointsPerDeposit")}</p>
+      <h1 className="mb-1 font-display text-3xl tracking-widest text-paper">DEPOSIT</h1>
+      <p className="mb-2 text-sm text-mist">
+        Pay to the account below, then upload a screenshot as proof. An admin reviews every
+        request before your wallet is credited.
+      </p>
+      <p className="mb-6 text-xs text-goldDim">
+        🎁 Earn 1 loyalty point per 100 ETB deposited — collect 50 to spin for a bonus.
+      </p>
 
       <form onSubmit={handleSubmit} className="mb-8 space-y-4 rounded-lg bg-surface p-6">
         <div>
-          <label className="mb-1 block text-sm text-mist">{t("paymentMethod")}</label>
+          <label className="mb-1 block text-sm text-mist">Payment method</label>
           <div className="flex gap-2">
             {["CBE", "TELEBIRR"].map((m) => (
               <button
@@ -131,14 +128,13 @@ export default function Deposit() {
 
         <div>
           <label htmlFor="amount" className="mb-1 block text-sm text-mist">
-            {t("amountPaid")}
+            Amount you paid (ETB)
           </label>
           <input
             id="amount"
             type="number"
             min="1"
             step="1"
-            required
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             className="w-full rounded border border-surfaceRaised bg-ink px-3 py-2 font-mono text-paper outline-none focus:border-gold"
@@ -146,35 +142,21 @@ export default function Deposit() {
         </div>
 
         <div>
-          <label htmlFor="transactionRef" className="mb-1 block text-sm text-mist">
-            {t("transactionRef")}
+          <label htmlFor="reference" className="mb-1 block text-sm text-mist">
+            Transaction reference (optional, speeds up approval)
           </label>
           <input
-            id="transactionRef"
-            required
-            value={transactionRef}
-            onChange={(e) => setTransactionRef(e.target.value)}
-            placeholder={method === "CBE" ? "FT24116CKXLS" : "TB123456789"}
-            className="w-full rounded border border-surfaceRaised bg-ink px-3 py-2 font-mono uppercase text-paper outline-none focus:border-gold"
-          />
-          <p className="mt-1 text-xs text-mist">{t("transactionRefHint")}</p>
-        </div>
-
-        <div>
-          <label htmlFor="senderName" className="mb-1 block text-sm text-mist">
-            {t("senderName")}
-          </label>
-          <input
-            id="senderName"
-            value={senderName}
-            onChange={(e) => setSenderName(e.target.value)}
-            className="w-full rounded border border-surfaceRaised bg-ink px-3 py-2 text-paper outline-none focus:border-gold"
+            id="reference"
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder="e.g. FT24123ABCDE"
+            className="w-full rounded border border-surfaceRaised bg-ink px-3 py-2 font-mono text-paper outline-none focus:border-gold"
           />
         </div>
 
         <div>
           <label htmlFor="screenshot" className="mb-1 block text-sm text-mist">
-            {t("paymentScreenshot")}
+            Payment screenshot
           </label>
           <input
             id="screenshot"
@@ -199,13 +181,13 @@ export default function Deposit() {
           disabled={submitting}
           className="w-full rounded bg-teal py-2 font-display tracking-widest text-ink transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          {submitting ? t("submitting").toUpperCase() : t("submitDepositRequest").toUpperCase()}
+          {submitting ? "SUBMITTING…" : "SUBMIT DEPOSIT REQUEST"}
         </button>
       </form>
 
-      <h2 className="mb-3 font-display tracking-widest text-mist">{t("yourRequests").toUpperCase()}</h2>
+      <h2 className="mb-3 font-display tracking-widest text-mist">YOUR REQUESTS</h2>
       {requests.length === 0 ? (
-        <p className="text-mist">{t("noTransactions")}</p>
+        <p className="text-mist">No deposit requests yet.</p>
       ) : (
         <ul className="divide-y divide-surfaceRaised rounded-lg bg-surface">
           {requests.map((r) => (
@@ -214,11 +196,13 @@ export default function Deposit() {
                 <div className="font-mono font-semibold">{r.amount} ETB</div>
                 <div className="text-xs text-mist">
                   {r.method} · {new Date(r.created_at).toLocaleString()}
-                  {r.auto_verified && (
-                    <span className="ml-2 text-teal">🤖 {t("autoVerified")}</span>
+                  {r.status === "APPROVED" && r.verification_source === "AUTO" && (
+                    <span className="ml-2 text-teal">⚡ auto-verified</span>
                   )}
                 </div>
-                {r.admin_note && <div className="text-xs text-brick">Note: {r.admin_note}</div>}
+                {r.admin_note && (
+                  <div className="text-xs text-brick">Note: {r.admin_note}</div>
+                )}
               </div>
               <span className={`font-display text-sm tracking-widest ${STATUS_COLOR[r.status]}`}>
                 {r.status}

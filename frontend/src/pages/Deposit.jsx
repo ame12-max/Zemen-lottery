@@ -35,46 +35,62 @@ export default function Deposit() {
     setPreview(f ? URL.createObjectURL(f) : null);
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError(null);
+async function handleSubmit(e) {
+  e.preventDefault();
+  setError(null);
 
-    const parsedAmount = parseInt(amount, 10);
-    if (!Number.isInteger(parsedAmount) || parsedAmount <= 0) {
-      setError("Enter a whole number of ETB greater than 0.");
-      return;
-    }
-    if (!file) {
-      setError("Attach a screenshot of your payment.");
-      return;
-    }
+  const parsedAmount = parseInt(amount, 10);
 
-    const formData = new FormData();
-    formData.append("amount", parsedAmount);
-    formData.append("method", method);
-    formData.append("screenshot", file);
-    if (reference.trim()) formData.append("reference", reference.trim());
-
-    setSubmitting(true);
-    try {
-      const { request } = await api.createDepositRequest(formData);
-      if (request.autoApproved) {
-        showToast("Payment verified automatically — your wallet has been credited! 🎉", "win");
-      } else {
-        showToast("Deposit request submitted — awaiting admin approval.", "success");
-      }
-      setAmount("");
-      setReference("");
-      setFile(null);
-      setPreview(null);
-      e.target.reset();
-      refreshRequests();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmitting(false);
-    }
+  if (!Number.isInteger(parsedAmount) || parsedAmount <= 0) {
+    setError("Enter a whole number of ETB greater than 0.");
+    return;
   }
+
+  if (!file) {
+    setError("Attach a screenshot of your payment.");
+    return;
+  }
+
+  if (!reference.trim()) {
+    setError("Enter the transaction ID/reference from your payment receipt.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("amount", parsedAmount);
+  formData.append("method", method);
+  formData.append("transactionRef", reference.trim());
+  formData.append("screenshot", file);
+
+  setSubmitting(true);
+
+  try {
+    const { request } = await api.createDepositRequest(formData);
+
+    if (request.autoApproved) {
+      showToast(
+        "Payment verified automatically — your wallet has been credited! 🎉",
+        "win"
+      );
+    } else {
+      showToast(
+        "Deposit request submitted — awaiting admin approval.",
+        "success"
+      );
+    }
+
+    setAmount("");
+    setReference("");
+    setFile(null);
+    setPreview(null);
+    e.target.reset();
+    refreshRequests();
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setSubmitting(false);
+  }
+}
 
   const account = methods?.[method.toLowerCase()];
 
@@ -86,7 +102,7 @@ export default function Deposit() {
         request before your wallet is credited.
       </p>
       <p className="mb-6 text-xs text-goldDim">
-        🎁 Earn 1 loyalty point per 100 ETB deposited — collect 50 to spin for a bonus.
+        🎁 Earn 10 loyalty point per 100 ETB deposited — collect 50 to spin for a bonus.
       </p>
 
       <form onSubmit={handleSubmit} className="mb-8 space-y-4 rounded-lg bg-surface p-6">
@@ -143,7 +159,7 @@ export default function Deposit() {
 
         <div>
           <label htmlFor="reference" className="mb-1 block text-sm text-mist">
-            Transaction reference (optional, speeds up approval)
+              Transaction ID / Reference
           </label>
           <input
             id="reference"

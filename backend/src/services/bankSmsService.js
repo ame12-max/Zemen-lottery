@@ -26,6 +26,8 @@ const depositRequestService = require("./depositRequestService");
  * and matching logic stay auditable.
  */
 async function ingest({ text, sender, provider: providerHint }) {
+    console.log("📥 [Service] ingest called with:", { text, sender, provider });
+
   if (!text || typeof text !== "string") {
     const err = new Error("`text` is required");
     err.statusCode = 400;
@@ -35,6 +37,7 @@ async function ingest({ text, sender, provider: providerHint }) {
   const parsed = parseBankSms(text, providerHint);
   const { provider, amount, ref, name } = parsed;
 
+  console.log(parsed);
   let matchedRequestId = null;
   let matchStrategy = null;
   let status = "UNPARSEABLE";

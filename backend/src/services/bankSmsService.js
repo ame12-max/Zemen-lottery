@@ -13,7 +13,12 @@ async function ingest({ text, sender, provider: providerHint }) {
   const parsed = parseBankSms(text, providerHint, sender);
   const { provider, amount, ref, name } = parsed;
 
-  console.log("📥 [Service] ingest called with:", { text, sender, providerHint, parsed });
+  console.log("📥 [Service] ingest called with:", {
+    text,
+    sender,
+    providerHint,
+    parsed,
+  });
 
   let matchedRequestId = null;
   let matchStrategy = null;
@@ -23,15 +28,18 @@ async function ingest({ text, sender, provider: providerHint }) {
     status = "UNMATCHED";
 
     // --- Strategy 1: exact reference match ---
+    // --- Strategy 1: exact transaction reference match ---
     if (ref) {
       const { rows } = await pool.query(
-        `SELECT id, amount FROM deposit_requests
-         WHERE status = 'PENDING'
-           AND method = $1
-           AND (lower(declared_reference) = lower($2) OR lower(ocr_transaction_id) = lower($2))
-         LIMIT 2`,
-        [provider, ref]
+        `SELECT id, amount
+     FROM deposit_requests
+     WHERE status = 'PENDING'
+       AND method = $1
+       AND lower(transaction_ref) = lower($2)
+     LIMIT 2`,
+        [provider, ref],
       );
+
       if (rows.length === 1 && Number(rows[0].amount) === amount) {
         matchedRequestId = rows[0].id;
         matchStrategy = "reference";
@@ -46,10 +54,10 @@ async function ingest({ text, sender, provider: providerHint }) {
            AND method = $1
            AND amount = $2
            AND created_at > now() - interval '48 hours'`,
-        [provider, amount]
+        [provider, amount],
       );
       const candidates = rows.filter(
-        (r) => r.sender_name && namesLooselyMatch(r.sender_name, name)
+        (r) => r.sender_name && namesLooselyMatch(r.sender_name, name),
       );
       if (candidates.length === 1) {
         matchedRequestId = candidates[0].id;
@@ -60,7 +68,9 @@ async function ingest({ text, sender, provider: providerHint }) {
     if (matchedRequestId) {
       try {
         // Note: approve expects adminId as second param; we pass null for auto
-        await depositRequestService.approve(matchedRequestId, null);
+        await depositRequestService.approve(matchedRequestId, null, {
+          auto: true,
+        });
         status = "MATCHED";
       } catch (err) {
         matchedRequestId = null;
@@ -86,16 +96,22 @@ async function ingest({ text, sender, provider: providerHint }) {
       matchedRequestId,
       matchStrategy,
       status,
-    ]
+    ],
   );
 
-  return { logId: logRows[0].id, status, matchedRequestId, matchStrategy, parsed };
+  return {
+    logId: logRows[0].id,
+    status,
+    matchedRequestId,
+    matchStrategy,
+    parsed,
+  };
 }
 
 async function listRecent(limit = 100) {
   const { rows } = await pool.query(
     `SELECT * FROM bank_sms_messages ORDER BY received_at DESC LIMIT $1`,
-    [limit]
+    [limit],
   );
   return rows;
 }

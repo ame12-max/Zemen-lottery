@@ -36,8 +36,11 @@ function parseCbeName(text) {
 
 function parseCbe(text) {
   const amount = parseAmount(text);
-  const refMatch = text.match(CBE_REF_RE);
-  const ref = refMatch ? refMatch[0].toUpperCase() : null;
+  const refMatch = text.match(
+  /(?:transaction\s*(?:id|number)?|reference|ref)[\s:#-]*([A-Z0-9-]+)/i
+);
+
+const ref = refMatch?.[1] || null;
   const name = parseCbeName(text);
 
   return { provider: "CBE", amount, ref, name };

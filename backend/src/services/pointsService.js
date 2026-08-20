@@ -4,10 +4,22 @@ const { creditWithinTransaction } = require("./walletService");
 const ApiError = require("../utils/ApiError");
 
 const SPIN_COST_POINTS = 50;
-const SPIN_MIN_REWARD = 5;
-const SPIN_MAX_REWARD = 50;
 const POINTS_PER_LEVEL = 100;
 const POINTS_PER_100_ETB_DEPOSITED = 1;
+
+// Fixed wheel segments, in display order — the frontend Wheel component
+// renders these exact wedges so the spin animation always lands on
+// whichever index the backend actually drew. Lower `weight` = rarer.
+const SPIN_SEGMENTS = [
+  { amount: 5, weight: 24 },
+  { amount: 10, weight: 20 },
+  { amount: 15, weight: 16 },
+  { amount: 20, weight: 13 },
+  { amount: 10, weight: 20 },
+  { amount: 25, weight: 10 },
+  { amount: 5, weight: 24 },
+  { amount: 50, weight: 3 },
+];
 
 async function ensureRow(userId, client = pool) {
   await client.query(
@@ -38,20 +50,17 @@ async function getPoints(userId) {
     pointsPerLevel: POINTS_PER_LEVEL,
     spinCost: SPIN_COST_POINTS,
     canSpin: spendablePoints >= SPIN_COST_POINTS,
+    spinSegments: SPIN_SEGMENTS.map((s) => s.amount),
   };
 }
 
 /**
- * Awards points for an approved deposit. MUST be called with the same
- * `client` (and therefore the same transaction) as the deposit's wallet
- * credit, so a crash between the two can't award points for money that
- * was never actually credited, or vice versa.
- * Rule: 1 point per 100 ETB deposited, rounded down.
+ * Generic point grant — both lifetime and spendable go up. Used for
+ * anything that isn't a deposit (currently: referral bonuses). Must be
+ * called with the same `client`/transaction as whatever triggered it.
  */
-async function awardDepositPoints(client, userId, depositAmount) {
-  const points = Math.floor(depositAmount / 100) * POINTS_PER_100_ETB_DEPOSITED;
+async function awardPoints(client, userId, points) {
   if (points <= 0) return 0;
-
   await ensureRow(userId, client);
   await client.query(
     `UPDATE user_points
@@ -65,10 +74,36 @@ async function awardDepositPoints(client, userId, depositAmount) {
 }
 
 /**
- * Spends 50 spendable points for a random 5-50 ETB reward, credited to
- * the wallet as a BONUS ledger entry. Uses crypto.randomInt, same as the
- * ticket draw — it's still real money leaving the platform, so it gets
- * the same "no Math.random" treatment.
+ * Awards points for an approved deposit. MUST be called with the same
+ * `client` (and therefore the same transaction) as the deposit's wallet
+ * credit, so a crash between the two can't award points for money that
+ * was never actually credited, or vice versa.
+ * Rule: 1 point per 100 ETB deposited, rounded down.
+ */
+async function awardDepositPoints(client, userId, depositAmount) {
+  const points = Math.floor(depositAmount / 100) * POINTS_PER_100_ETB_DEPOSITED;
+  return awardPoints(client, userId, points);
+}
+
+/**
+ * Picks a segment index with a cryptographically secure weighted draw —
+ * same reasoning as the ticket draw: it decides a real money payout, so
+ * Math.random is never acceptable here.
+ */
+function pickSegmentIndex() {
+  const totalWeight = SPIN_SEGMENTS.reduce((sum, s) => sum + s.weight, 0);
+  const roll = crypto.randomInt(0, totalWeight);
+  let acc = 0;
+  for (let i = 0; i < SPIN_SEGMENTS.length; i++) {
+    acc += SPIN_SEGMENTS[i].weight;
+    if (roll < acc) return i;
+  }
+  return SPIN_SEGMENTS.length - 1;
+}
+
+/**
+ * Spends 50 spendable points for a wheel spin, credited to the wallet as
+ * a BONUS ledger entry.
  */
 async function spin(userId) {
   return withTransaction(async (client) => {
@@ -86,7 +121,8 @@ async function spin(userId) {
       );
     }
 
-    const reward = crypto.randomInt(SPIN_MIN_REWARD, SPIN_MAX_REWARD + 1);
+    const segmentIndex = pickSegmentIndex();
+    const reward = SPIN_SEGMENTS[segmentIndex].amount;
 
     await client.query(
       `UPDATE user_points
@@ -106,36 +142,15 @@ async function spin(userId) {
     // can never be credited twice even if something retried this call.
     await creditWithinTransaction(client, userId, reward, "BONUS", `spin:${spinId}`);
 
-    return { reward, spinId };
+    return { reward, spinId, segmentIndex };
   });
-}
-
-/**
- * Generic points award not tied to a deposit — used for referral rewards
- * and any other future bonus source. Same transaction-scoping contract as
- * awardDepositPoints: pass the caller's client so it's atomic with
- * whatever triggered it.
- */
-async function awardBonusPoints(client, userId, points) {
-  if (points <= 0) return 0;
-  await ensureRow(userId, client);
-  await client.query(
-    `UPDATE user_points
-     SET lifetime_points = lifetime_points + $1,
-         spendable_points = spendable_points + $1,
-         updated_at = now()
-     WHERE user_id = $2`,
-    [points, userId]
-  );
-  return points;
 }
 
 module.exports = {
   getPoints,
+  awardPoints,
   awardDepositPoints,
-  awardBonusPoints,
   spin,
   SPIN_COST_POINTS,
-  SPIN_MIN_REWARD,
-  SPIN_MAX_REWARD,
+  SPIN_SEGMENTS,
 };

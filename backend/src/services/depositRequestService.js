@@ -4,29 +4,36 @@ const pointsService = require("./pointsService");
 const referralService = require("./referralService");
 const ApiError = require("../utils/ApiError");
 
-async function createRequest(userId, amount, method, screenshotPath, extracted = {}) {
+async function createRequest(userId, amount, method, screenshotPath, transactionRef, senderName) {
   if (!Number.isInteger(amount) || amount <= 0) {
     throw new ApiError(400, "Amount must be a positive whole number");
   }
   if (!["CBE", "TELEBIRR"].includes(method)) {
     throw new ApiError(400, "Method must be CBE or TELEBIRR");
   }
+  if (!transactionRef || !transactionRef.trim()) {
+    throw new ApiError(400, "Transaction reference/ID from your receipt is required");
+  }
 
-  const { ocrTransactionId = null, ocrAmount = null, declaredReference = null } = extracted;
-
-  const { rows } = await pool.query(
-    `INSERT INTO deposit_requests
-       (user_id, amount, method, screenshot_path, ocr_transaction_id, ocr_amount, declared_reference)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, amount, method, status, ocr_transaction_id, created_at`,
-    [userId, amount, method, screenshotPath, ocrTransactionId, ocrAmount, declaredReference]
-  );
-  return rows[0];
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO deposit_requests (user_id, amount, method, screenshot_path, transaction_ref, sender_name)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, amount, method, status, transaction_ref, created_at`,
+      [userId, amount, method, screenshotPath, transactionRef.trim(), senderName?.trim() || null]
+    );
+    return rows[0];
+  } catch (err) {
+    if (err.code === "23505") {
+      throw new ApiError(409, "This transaction reference has already been submitted");
+    }
+    throw err;
+  }
 }
 
 async function listForUser(userId) {
   const { rows } = await pool.query(
-    `SELECT id, amount, method, status, verification_source, admin_note, created_at, reviewed_at
+    `SELECT id, amount, method, status, admin_note, transaction_ref, auto_verified, created_at, reviewed_at
      FROM deposit_requests WHERE user_id = $1 ORDER BY created_at DESC`,
     [userId]
   );
@@ -35,8 +42,8 @@ async function listForUser(userId) {
 
 async function listForAdmin(status) {
   const { rows } = await pool.query(
-    `SELECT dr.id, dr.amount, dr.method, dr.status, dr.verification_source,
-            dr.ocr_transaction_id, dr.declared_reference, dr.created_at, dr.reviewed_at,
+    `SELECT dr.id, dr.amount, dr.method, dr.status, dr.created_at, dr.reviewed_at,
+            dr.transaction_ref, dr.sender_name, dr.auto_verified,
             u.id AS user_id, u.name AS user_name, u.phone AS user_phone
      FROM deposit_requests dr
      JOIN users u ON u.id = dr.user_id
@@ -58,65 +65,64 @@ async function getScreenshotPath(requestId) {
 }
 
 /**
- * Shared approval core. Assumes it's called from WITHIN an existing
- * transaction (`client`) with the row not yet locked — it takes the lock
- * itself. Used by both:
- *  - `approve()` below (manual admin click, wraps its own transaction)
- *  - `autoVerificationService` (system-triggered match, wraps its own
- *    transaction alongside marking the matched bank_messages row)
+ * Approves a deposit request, crediting the wallet, awarding loyalty
+ * points, and paying out any qualifying referral bonus — all in one
+ * transaction.
  *
- * `reviewedBy` is null for AUTO approvals — there's no admin to attribute
- * it to.
+ * `adminId` is the reviewing admin's user id, OR null when this is an
+ * automatic approval triggered by a matched bank SMS (see
+ * bankSmsService.ingest) — pass { auto: true } in that case so the record
+ * is clearly marked as machine-verified rather than human-reviewed.
  */
-async function runApprovalWithinTransaction(client, requestId, { reviewedBy, source }) {
-  const { rows } = await client.query(
-    `SELECT * FROM deposit_requests WHERE id = $1 FOR UPDATE`,
-    [requestId]
-  );
-  if (rows.length === 0) throw new ApiError(404, "Deposit request not found");
-  const reqRow = rows[0];
-  if (reqRow.status !== "PENDING") {
-    throw new ApiError(400, `Request already ${reqRow.status.toLowerCase()}`);
-  }
+async function approve(requestId, adminId, { auto = false } = {}) {
+  return withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT * FROM deposit_requests WHERE id = $1 FOR UPDATE`,
+      [requestId]
+    );
+    if (rows.length === 0) throw new ApiError(404, "Deposit request not found");
+    const reqRow = rows[0];
+    if (reqRow.status !== "PENDING") {
+      throw new ApiError(400, `Request already ${reqRow.status.toLowerCase()}`);
+    }
 
-  await client.query(
-    `UPDATE deposit_requests
-     SET status = 'APPROVED', verification_source = $1, reviewed_by = $2, reviewed_at = now()
-     WHERE id = $3`,
-    [source, reviewedBy, requestId]
-  );
+    await client.query(
+      `UPDATE deposit_requests
+       SET status = 'APPROVED', reviewed_by = $1, reviewed_at = now(),
+           auto_verified = $2, admin_note = COALESCE(admin_note, $3)
+       WHERE id = $4`,
+      [adminId, auto, auto ? "Auto-verified via bank SMS match" : null, requestId]
+    );
 
-  // Reference ties the ledger entry to this exact request, so approving
-  // twice (e.g. a double click, or a race with auto-verification) can't
-  // double-credit — the second attempt already fails the PENDING check above.
-  await creditWithinTransaction(
-    client,
-    reqRow.user_id,
-    Number(reqRow.amount),
-    "DEPOSIT",
-    `deposit-request:${requestId}`
-  );
+    // Reference ties the ledger entry to this exact request, so approving
+    // twice (e.g. a double click) can't double-credit — the second attempt
+    // will already fail the PENDING check above before this even runs.
+    await creditWithinTransaction(
+      client,
+      reqRow.user_id,
+      Number(reqRow.amount),
+      "DEPOSIT",
+      `deposit-request:${requestId}`
+    );
 
-  const pointsEarned = await pointsService.awardDepositPoints(
-    client,
-    reqRow.user_id,
-    Number(reqRow.amount)
-  );
+    // Award loyalty points in the SAME transaction as the credit — they
+    // succeed or fail together.
+    const pointsEarned = await pointsService.awardDepositPoints(
+      client,
+      reqRow.user_id,
+      Number(reqRow.amount)
+    );
 
-  const referralResult = await referralService.processReferralReward(
-    client,
-    reqRow.user_id,
-    Number(reqRow.amount),
-    requestId
-  );
+    // If this user was invited and this is their qualifying deposit, pay
+    // the inviter their referral bonus — also in the same transaction.
+    const referralReward = await referralService.checkAndRewardReferral(
+      client,
+      reqRow.user_id,
+      Number(reqRow.amount)
+    );
 
-  return { id: requestId, status: "APPROVED", source, pointsEarned, referralResult };
-}
-
-async function approve(requestId, adminId) {
-  return withTransaction((client) =>
-    runApprovalWithinTransaction(client, requestId, { reviewedBy: adminId, source: "MANUAL" })
-  );
+    return { id: requestId, status: "APPROVED", pointsEarned, autoVerified: auto, referralReward };
+  });
 }
 
 async function reject(requestId, adminId, note) {
@@ -146,7 +152,6 @@ module.exports = {
   listForUser,
   listForAdmin,
   getScreenshotPath,
-  runApprovalWithinTransaction,
   approve,
   reject,
 };

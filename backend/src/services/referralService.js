@@ -1,120 +1,130 @@
 const crypto = require("crypto");
 const { pool } = require("../config/db");
+const { awardPoints } = require("./pointsService");
 const { creditWithinTransaction } = require("./walletService");
-const pointsService = require("./pointsService");
+const { REFERRAL_BONUS_AMOUNT, REFERRAL_BONUS_POINTS, REFERRAL_MIN_DEPOSIT } = require("../config/referral");
+const ApiError = require("../utils/ApiError");
 
-const REFERRAL_REWARD_ETB = Number(process.env.REFERRAL_REWARD_ETB || 10);
-const REFERRAL_REWARD_POINTS = Number(process.env.REFERRAL_REWARD_POINTS || 5);
-const REFERRAL_MIN_DEPOSIT = Number(process.env.REFERRAL_MIN_DEPOSIT || 100);
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I, avoids confusion
 
-function generateCode() {
-  return crypto.randomBytes(5).toString("hex").toUpperCase().slice(0, 8);
-}
-
-/**
- * Generates a unique referral code for a new user. Retries a handful of
- * times on the rare collision — 8 hex chars is a big enough space that
- * this is mostly a formality, but a fixed retry loop is safer than
- * assuming uniqueness.
- */
-async function generateUniqueCode(client) {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const code = generateCode();
-    const { rows } = await client.query(`SELECT 1 FROM users WHERE referral_code = $1`, [code]);
-    if (rows.length === 0) return code;
+function randomCode(length = 6) {
+  let code = "";
+  for (let i = 0; i < length; i++) {
+    code += CODE_ALPHABET[crypto.randomInt(0, CODE_ALPHABET.length)];
   }
-  throw new Error("Could not generate a unique referral code — try again");
-}
-
-async function findInviterByCode(code) {
-  if (!code) return null;
-  const { rows } = await pool.query(`SELECT id FROM users WHERE referral_code = $1`, [
-    code.trim().toUpperCase(),
-  ]);
-  return rows[0]?.id || null;
+  return code;
 }
 
 /**
- * Called once, inside the same transaction as a user's registration, to
- * record that they were referred (if a valid code was supplied). Reward
- * isn't paid yet — that happens on the invitee's first qualifying deposit.
+ * Generates a unique referral code for a brand-new user. Called inside the
+ * registration transaction, right after the user row is inserted.
  */
-async function recordReferralIfAny(client, inviterId, inviteeId) {
-  if (!inviterId) return;
+async function assignReferralCode(client, userId) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const code = randomCode();
+    try {
+      await client.query(`UPDATE users SET referral_code = $1 WHERE id = $2`, [code, userId]);
+      return code;
+    } catch (err) {
+      if (err.code === "23505") continue; // collision — vanishingly rare, just retry
+      throw err;
+    }
+  }
+  throw new Error("Could not generate a unique referral code");
+}
+
+/**
+ * Links a new user to whoever invited them. Silently no-ops on a bad/self
+ * code — an invalid referral code shouldn't block registration.
+ */
+async function linkReferral(client, newUserId, referralCodeInput) {
+  if (!referralCodeInput || typeof referralCodeInput !== "string") return;
+  const code = referralCodeInput.trim().toUpperCase();
+  if (!code) return;
+
+  const { rows } = await client.query(`SELECT id FROM users WHERE referral_code = $1`, [code]);
+  if (rows.length === 0) return;
+  const inviterId = rows[0].id;
+  if (inviterId === newUserId) return;
+
+  await client.query(`UPDATE users SET referred_by = $1 WHERE id = $2`, [inviterId, newUserId]);
   await client.query(
     `INSERT INTO referrals (inviter_id, invitee_id) VALUES ($1, $2)
      ON CONFLICT (invitee_id) DO NOTHING`,
-    [inviterId, inviteeId]
+    [inviterId, newUserId]
   );
 }
 
 /**
- * Checks whether an approved deposit should trigger a referral reward, and
- * pays it out if so. MUST be called with the same `client`/transaction as
- * the deposit's own wallet credit — reward and deposit succeed or fail
- * together.
- *
- * Reward rule: the invitee's FIRST deposit of at least REFERRAL_MIN_DEPOSIT
- * ETB triggers a one-time reward to the inviter. Deliberately one-time —
- * without that, a referral pair could repeatedly deposit/withdraw to farm
- * rewards indefinitely.
+ * Called from inside depositRequestService.approve's transaction, right
+ * after the deposit is credited. If this deposit is the invitee's
+ * qualifying deposit (>= REFERRAL_MIN_DEPOSIT) and their referral is still
+ * PENDING, pays the inviter their bonus ETB + points and marks it COMPLETED.
+ * Safe to call on every approval — it's a no-op once already COMPLETED.
  */
-async function processReferralReward(client, invoiceeUserId, depositAmount, depositRequestId) {
+async function checkAndRewardReferral(client, invitedUserId, depositAmount) {
   if (depositAmount < REFERRAL_MIN_DEPOSIT) return null;
 
   const { rows } = await client.query(
     `SELECT * FROM referrals WHERE invitee_id = $1 AND status = 'PENDING' FOR UPDATE`,
-    [invoiceeUserId]
+    [invitedUserId]
   );
+  if (rows.length === 0) return null;
   const referral = rows[0];
-  if (!referral) return null; // not referred, or already rewarded
 
   await client.query(
     `UPDATE referrals
-     SET status = 'REWARDED', reward_amount = $1, points_awarded = $2,
-         triggering_deposit_request_id = $3, rewarded_at = now()
-     WHERE id = $4`,
-    [REFERRAL_REWARD_ETB, REFERRAL_REWARD_POINTS, depositRequestId, referral.id]
+     SET status = 'COMPLETED', reward_amount = $1, reward_points = $2, completed_at = now()
+     WHERE id = $3`,
+    [REFERRAL_BONUS_AMOUNT, REFERRAL_BONUS_POINTS, referral.id]
   );
 
   await creditWithinTransaction(
     client,
     referral.inviter_id,
-    REFERRAL_REWARD_ETB,
-    "REFERRAL_BONUS",
+    REFERRAL_BONUS_AMOUNT,
+    "REFERRAL",
     `referral:${referral.id}`
   );
-  await pointsService.awardBonusPoints(client, referral.inviter_id, REFERRAL_REWARD_POINTS);
+  await awardPoints(client, referral.inviter_id, REFERRAL_BONUS_POINTS);
 
-  return { inviterId: referral.inviter_id, reward: REFERRAL_REWARD_ETB, points: REFERRAL_REWARD_POINTS };
+  return {
+    inviterId: referral.inviter_id,
+    rewardAmount: REFERRAL_BONUS_AMOUNT,
+    rewardPoints: REFERRAL_BONUS_POINTS,
+  };
 }
 
 async function getMyReferralInfo(userId) {
-  const { rows: userRows } = await pool.query(`SELECT referral_code FROM users WHERE id = $1`, [
-    userId,
-  ]);
-  const { rows: referrals } = await pool.query(
-    `SELECT r.status, r.reward_amount, r.points_awarded, r.created_at, r.rewarded_at,
-            u.name AS invitee_name, u.phone AS invitee_phone
+  const { rows: userRows } = await pool.query(
+    `SELECT referral_code FROM users WHERE id = $1`,
+    [userId]
+  );
+  if (userRows.length === 0) throw new ApiError(404, "User not found");
+
+  const { rows } = await pool.query(
+    `SELECT r.status, r.reward_amount, r.reward_points, r.created_at, r.completed_at,
+            u.name AS invitee_name
      FROM referrals r
      JOIN users u ON u.id = r.invitee_id
      WHERE r.inviter_id = $1
      ORDER BY r.created_at DESC`,
     [userId]
   );
+
+  const completed = rows.filter((r) => r.status === "COMPLETED");
+  const totalEarned = completed.reduce((sum, r) => sum + Number(r.reward_amount || 0), 0);
+
   return {
-    referralCode: userRows[0]?.referral_code || null,
-    rewardPerReferral: REFERRAL_REWARD_ETB,
-    pointsPerReferral: REFERRAL_REWARD_POINTS,
-    minimumDeposit: REFERRAL_MIN_DEPOSIT,
-    referrals,
+    referralCode: userRows[0].referral_code,
+    bonusAmount: REFERRAL_BONUS_AMOUNT,
+    bonusPoints: REFERRAL_BONUS_POINTS,
+    minDeposit: REFERRAL_MIN_DEPOSIT,
+    totalInvited: rows.length,
+    totalCompleted: completed.length,
+    totalEarned,
+    referrals: rows,
   };
 }
 
-module.exports = {
-  generateUniqueCode,
-  findInviterByCode,
-  recordReferralIfAny,
-  processReferralReward,
-  getMyReferralInfo,
-};
+module.exports = { assignReferralCode, linkReferral, checkAndRewardReferral, getMyReferralInfo };

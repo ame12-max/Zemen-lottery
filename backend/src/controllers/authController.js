@@ -28,20 +28,14 @@ const register = asyncHandler(async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
-  // Look up the inviter before opening the transaction — an invalid/unknown
-  // code is silently ignored rather than blocking registration.
-  const inviterId = referralCode ? await referralService.findInviterByCode(referralCode) : null;
 
   const user = await withTransaction(async (client) => {
-    const ownCode = await referralService.generateUniqueCode(client);
-
     let inserted;
     try {
       inserted = await client.query(
-        `INSERT INTO users (name, phone, password_hash, referral_code, referred_by)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, name, phone, role, referral_code`,
-        [name.trim(), phone, passwordHash, ownCode, inviterId]
+        `INSERT INTO users (name, phone, password_hash) VALUES ($1, $2, $3)
+         RETURNING id, name, phone, role`,
+        [name.trim(), phone, passwordHash]
       );
     } catch (err) {
       if (err.code === "23505") throw new ApiError(409, "Phone number already registered");
@@ -49,7 +43,8 @@ const register = asyncHandler(async (req, res) => {
     }
     const newUser = inserted.rows[0];
     await ensureWallet(newUser.id, client);
-    await referralService.recordReferralIfAny(client, inviterId, newUser.id);
+    newUser.referral_code = await referralService.assignReferralCode(client, newUser.id);
+    await referralService.linkReferral(client, newUser.id, referralCode);
     return newUser;
   });
 

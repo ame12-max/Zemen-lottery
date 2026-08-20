@@ -14,7 +14,6 @@ const {
   getWithdrawalTerms,
   getMyPoints,
   spinWheel,
-  getMyReferralInfo,
 } = require("../controllers/walletController");
 
 const router = express.Router();
@@ -26,8 +25,6 @@ router.get("/me/transactions", getMyTransactions);
 
 router.get("/points", getMyPoints);
 router.post("/spin", spinWheel);
-
-router.get("/referrals", getMyReferralInfo);
 
 router.get("/payment-methods", getPaymentMethods);
 router.post("/deposit-requests", uploadDepositScreenshot.single("screenshot"), createDepositRequest);

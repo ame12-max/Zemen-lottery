@@ -4,10 +4,6 @@ const depositRequestService = require("../services/depositRequestService");
 const payoutProfileService = require("../services/payoutProfileService");
 const withdrawalService = require("../services/withdrawalService");
 const pointsService = require("../services/pointsService");
-const referralService = require("../services/referralService");
-const autoVerificationService = require("../services/autoVerificationService");
-const ocrService = require("../services/ocrService");
-const { parseBankMessage } = require("../utils/bankMessageParser");
 const paymentMethods = require("../config/paymentMethods");
 const { WITHDRAWAL_FEE_PERCENT, MIN_WITHDRAWAL_AMOUNT } = require("../config/fees");
 const { uploadScreenshotBuffer, isConfigured } = require("../config/cloudinary");
@@ -29,10 +25,8 @@ const getPaymentMethods = asyncHandler(async (req, res) => {
 });
 
 // User submits amount + method + a screenshot proving they paid the
-// sample CBE/Telebirr account. Runs OCR on the screenshot and attempts
-// auto-verification against any bank SMS already received; if that
-// doesn't produce a confident match, the request goes to PENDING for an
-// admin to review manually — same as before.
+// sample CBE/Telebirr account. Goes to PENDING until an admin reviews it —
+// the wallet is NOT credited here.
 const createDepositRequest = asyncHandler(async (req, res) => {
   if (!req.file) throw new ApiError(400, "Screenshot is required");
   if (!isConfigured()) {
@@ -44,38 +38,23 @@ const createDepositRequest = asyncHandler(async (req, res) => {
 
   const amount = parseInt(req.body.amount, 10);
   const method = req.body.method;
-  const declaredReference = req.body.reference ? String(req.body.reference).trim() : null;
-
-  // OCR the screenshot BEFORE uploading — we only need the buffer for
-  // this, and it lets auto-verification run immediately after the row
-  // is created rather than waiting on a round-trip to Cloudinary.
-  const ocrText = await ocrService.extractTextFromImage(req.file.buffer);
-  const ocrParsed = parseBankMessage(ocrText);
+  const transactionRef = req.body.transactionRef;
+  const senderName = req.body.senderName;
 
   // Upload straight to Cloudinary from the in-memory buffer — nothing
   // touches this server's disk.
   const publicId = crypto.randomUUID();
   await uploadScreenshotBuffer(req.file.buffer, publicId);
 
-  const request = await depositRequestService.createRequest(req.user.id, amount, method, publicId, {
-    ocrTransactionId: ocrParsed.transactionId,
-    ocrAmount: ocrParsed.amount,
-    declaredReference,
-  });
-
-  // Best-effort: if a matching bank SMS already arrived, this credits the
-  // wallet immediately. Any failure here must NOT fail the request — the
-  // deposit was created successfully and correctly falls back to manual
-  // review either way.
-  let autoApproved = false;
-  try {
-    const result = await autoVerificationService.attemptAutoVerify(request.id);
-    autoApproved = Boolean(result);
-  } catch (err) {
-    console.warn("Auto-verification attempt failed (falling back to manual review):", err.message);
-  }
-
-  res.status(201).json({ request: { ...request, autoApproved } });
+  const request = await depositRequestService.createRequest(
+    req.user.id,
+    amount,
+    method,
+    publicId,
+    transactionRef,
+    senderName
+  );
+  res.status(201).json({ request });
 });
 
 const listMyDepositRequests = asyncHandler(async (req, res) => {
@@ -124,11 +103,6 @@ const spinWheel = asyncHandler(async (req, res) => {
   res.json({ result });
 });
 
-const getMyReferralInfo = asyncHandler(async (req, res) => {
-  const info = await referralService.getMyReferralInfo(req.user.id);
-  res.json({ referral: info });
-});
-
 module.exports = {
   getMyWallet,
   getMyTransactions,
@@ -142,5 +116,4 @@ module.exports = {
   getWithdrawalTerms,
   getMyPoints,
   spinWheel,
-  getMyReferralInfo,
 };

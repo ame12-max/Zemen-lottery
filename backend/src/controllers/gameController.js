@@ -16,6 +16,11 @@ const getGameTickets = asyncHandler(async (req, res) => {
   res.json({ tickets });
 });
 
+const getGameWinners = asyncHandler(async (req, res) => {
+  const winners = await gameService.getGameWinners(req.params.gameId);
+  res.json({ winners });
+});
+
 const buyTicket = asyncHandler(async (req, res) => {
   const { ticketNumber } = req.body;
   const ticket = await gameService.buyTicket(req.params.gameId, req.user.id, ticketNumber);
@@ -28,7 +33,7 @@ const myTickets = asyncHandler(async (req, res) => {
 });
 
 const recentWinners = asyncHandler(async (req, res) => {
-  const winners = await gameService.getRecentWinners(10);
+  const winners = await gameService.getRecentWinners(20);
   res.json({ winners });
 });
 
@@ -38,7 +43,7 @@ const myUnseenWins = asyncHandler(async (req, res) => {
 });
 
 const acknowledgeWin = asyncHandler(async (req, res) => {
-  const result = await gameService.acknowledgeWin(req.user.id, req.params.ticketId);
+  const result = await gameService.acknowledgeWin(req.user.id, req.params.winId);
   res.json({ result });
 });
 
@@ -46,6 +51,7 @@ module.exports = {
   listOpenGames,
   getGame,
   getGameTickets,
+  getGameWinners,
   buyTicket,
   myTickets,
   recentWinners,

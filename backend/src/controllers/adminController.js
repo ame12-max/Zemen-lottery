@@ -2,19 +2,53 @@ const gameService = require("../services/gameService");
 const depositRequestService = require("../services/depositRequestService");
 const withdrawalService = require("../services/withdrawalService");
 const bankSmsService = require("../services/bankSmsService");
+const adminReportingService = require("../services/adminReportingService");
 const { getSignedUrl } = require("../config/cloudinary");
 const asyncHandler = require("../utils/asyncHandler");
 
 const createGame = asyncHandler(async (req, res) => {
-  const { name, ticketPrice, maxTickets, prizeAmount } = req.body;
+  const { name, ticketPrice, maxTickets, prizeTiers } = req.body;
   const game = await gameService.createGame({
     name,
     ticketPrice,
     maxTickets,
-    prizeAmount,
+    prizeTiers,
     createdBy: req.user.id,
   });
   res.status(201).json({ game });
+});
+
+const listGamesAdmin = asyncHandler(async (req, res) => {
+  const games = await gameService.listGamesAdmin();
+  res.json({ games });
+});
+
+const updateGame = asyncHandler(async (req, res) => {
+  const { name, ticketPrice, maxTickets, prizeTiers } = req.body;
+  const game = await gameService.updateGame(req.params.id, {
+    name,
+    ticketPrice,
+    maxTickets,
+    prizeTiers,
+  });
+  res.json({ game });
+});
+
+const deleteGame = asyncHandler(async (req, res) => {
+  const result = await gameService.deleteGame(req.params.id);
+  res.json({ result });
+});
+
+// --- User reporting ---
+
+const getUserStats = asyncHandler(async (req, res) => {
+  const stats = await adminReportingService.getUserStats();
+  res.json({ stats });
+});
+
+const listUsers = asyncHandler(async (req, res) => {
+  const users = await adminReportingService.listUsers(req.query.filter);
+  res.json({ users });
 });
 
 // --- Deposit review ---
@@ -70,6 +104,11 @@ const listBankSms = asyncHandler(async (req, res) => {
 
 module.exports = {
   createGame,
+  listGamesAdmin,
+  updateGame,
+  deleteGame,
+  getUserStats,
+  listUsers,
   listDepositRequests,
   getDepositScreenshot,
   approveDeposit,

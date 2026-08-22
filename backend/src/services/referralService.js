@@ -72,12 +72,13 @@ async function checkAndRewardReferral(client, invitedUserId, depositAmount) {
   if (rows.length === 0) return null;
   const referral = rows[0];
 
-  await client.query(
+   await client.query(
     `UPDATE referrals
-     SET status = 'COMPLETED', reward_amount = $1, reward_points = $2, completed_at = now()
+     SET status = 'REWARDED', reward_amount = $1, reward_points = $2, completed_at = EXTRACT(EPOCH FROM now())::INTEGER
      WHERE id = $3`,
     [REFERRAL_BONUS_AMOUNT, REFERRAL_BONUS_POINTS, referral.id]
   );
+
 
   await creditWithinTransaction(
     client,

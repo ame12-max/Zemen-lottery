@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../services/api.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
+import { ArrowUpRight, ArrowDownLeft, ArrowUpFromLine, ArrowDownToLine } from 'lucide-react';
 
 const TYPE_COLOR = {
   DEPOSIT: "text-teal",
@@ -41,12 +42,14 @@ export default function Wallet() {
           className="rounded-lg bg-teal py-4 text-center font-display text-lg tracking-widest text-ink transition-opacity hover:opacity-90"
         >
           {t("deposit").toUpperCase()}
+          <ArrowDownLeft className="ml-2 inline h-4 w-4" />
         </Link>
         <Link
           to="/withdraw"
           className="rounded-lg bg-gold py-4 text-center font-display text-lg tracking-widest text-ink transition-opacity hover:opacity-90"
         >
           {t("withdraw").toUpperCase()}
+          <ArrowUpRight className="ml-2 inline h-4 w-4" />
         </Link>
       </div>
 

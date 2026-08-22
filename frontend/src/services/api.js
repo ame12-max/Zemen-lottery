@@ -92,7 +92,7 @@ export const api = {
   getMyPoints: () => request("/wallet/points"),
   spin: () => request("/wallet/spin", { method: "POST" }),
 
-  getReferralInfo: () => request("/wallet/referrals"),
+  getReferralInfo: () => request("/referrals/me"),
 
   listGames: () => request("/games"),
   getGame: (gameId) => request(`/games/${gameId}`),

@@ -3,6 +3,11 @@ const requireAuth = require("../middleware/auth");
 const requireAdmin = require("../middleware/admin");
 const {
   createGame,
+  listGamesAdmin,
+  updateGame,
+  deleteGame,
+  getUserStats,
+  listUsers,
   listDepositRequests,
   getDepositScreenshot,
   approveDeposit,
@@ -18,6 +23,12 @@ const router = express.Router();
 router.use(requireAuth, requireAdmin);
 
 router.post("/games", createGame);
+router.get("/games", listGamesAdmin);
+router.put("/games/:id", updateGame);
+router.delete("/games/:id", deleteGame);
+
+router.get("/users/stats", getUserStats);
+router.get("/users", listUsers);
 
 router.get("/deposit-requests", listDepositRequests);
 router.get("/deposit-requests/:id/screenshot", getDepositScreenshot);

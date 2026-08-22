@@ -8,6 +8,16 @@ const STATUS_COLOR = {
   REJECTED: "text-brick",
 };
 
+// Helper to mask a string: show first N, then asterisks, then last M
+function maskString(str, first = 3, last = 2, maskChar = "*") {
+  if (!str) return "";
+  if (str.length <= first + last) return str; // too short, show as-is
+  const visibleStart = str.slice(0, first);
+  const visibleEnd = str.slice(-last);
+  const maskedLength = str.length - first - last;
+  return visibleStart + maskChar.repeat(maskedLength) + visibleEnd;
+}
+
 export default function Deposit() {
   const { showToast } = useToast();
   const [methods, setMethods] = useState(null);
@@ -35,64 +45,74 @@ export default function Deposit() {
     setPreview(f ? URL.createObjectURL(f) : null);
   }
 
-async function handleSubmit(e) {
-  e.preventDefault();
-  setError(null);
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(null);
 
-  const parsedAmount = parseInt(amount, 10);
+    const parsedAmount = parseInt(amount, 10);
 
-  if (!Number.isInteger(parsedAmount) || parsedAmount <= 0) {
-    setError("Enter a whole number of ETB greater than 0.");
-    return;
-  }
-
-  if (!file) {
-    setError("Attach a screenshot of your payment.");
-    return;
-  }
-
-  if (!reference.trim()) {
-    setError("Enter the transaction ID/reference from your payment receipt.");
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("amount", parsedAmount);
-  formData.append("method", method);
-  formData.append("transactionRef", reference.trim());
-  formData.append("screenshot", file);
-
-  setSubmitting(true);
-
-  try {
-    const { request } = await api.createDepositRequest(formData);
-
-    if (request.autoApproved) {
-      showToast(
-        "Payment verified automatically — your wallet has been credited! 🎉",
-        "win"
-      );
-    } else {
-      showToast(
-        "Deposit request submitted — awaiting admin approval.",
-        "success"
-      );
+    if (!Number.isInteger(parsedAmount) || parsedAmount <= 0) {
+      setError("Enter a whole number of ETB greater than 0.");
+      return;
     }
 
-    setAmount("");
-    setReference("");
-    setFile(null);
-    setPreview(null);
-    e.target.reset();
-    refreshRequests();
-  } catch (err) {
-    setError(err.message);
-  } finally {
-    setSubmitting(false);
+    if (!file) {
+      setError("Attach a screenshot of your payment.");
+      return;
+    }
+
+    if (!reference.trim()) {
+      setError("Enter the transaction ID/reference from your payment receipt.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("amount", parsedAmount);
+    formData.append("method", method);
+    formData.append("transactionRef", reference.trim());
+    formData.append("screenshot", file);
+
+    setSubmitting(true);
+
+    try {
+      const { request } = await api.createDepositRequest(formData);
+
+      if (request.autoApproved) {
+        showToast(
+          "Payment verified automatically — your wallet has been credited! 🎉",
+          "win"
+        );
+      } else {
+        showToast(
+          "Deposit request submitted — awaiting admin approval.",
+          "success"
+        );
+      }
+
+      setAmount("");
+      setReference("");
+      setFile(null);
+      setPreview(null);
+      e.target.reset();
+      refreshRequests();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
   }
-}
 
   const account = methods?.[method.toLowerCase()];
+
+  // Copy handler
+  const handleCopy = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`${label} copied to clipboard!`, "success");
+    } catch {
+      showToast("Failed to copy. Please copy manually.", "error");
+    }
+  };
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
@@ -133,11 +153,44 @@ async function handleSubmit(e) {
               <span className="text-ink/60">Account name</span>
               <span className="font-semibold">{account.accountName}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-ink/60">{method === "CBE" ? "Account number" : "Phone number"}</span>
-              <span className="font-semibold">
-                {method === "CBE" ? account.accountNumber : account.phoneNumber}
+            <div className="flex justify-between items-center">
+              <span className="text-ink/60">
+                {method === "CBE" ? "Account number" : "Phone number"}
               </span>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">
+                  {method === "CBE"
+                    ? maskString(account.accountNumber, 3, 2)
+                    : maskString(account.phoneNumber, 4, 2)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopy(
+                      method === "CBE" ? account.accountNumber : account.phoneNumber,
+                      method === "CBE" ? "Account number" : "Phone number"
+                    )
+                  }
+                  className="text-mist hover:text-paper transition-colors"
+                  aria-label="Copy to clipboard"
+                >
+                  {/* Simple inline SVG copy icon */}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -159,7 +212,7 @@ async function handleSubmit(e) {
 
         <div>
           <label htmlFor="reference" className="mb-1 block text-sm text-mist">
-              Transaction ID / Reference
+            Transaction ID / Reference
           </label>
           <input
             id="reference"
